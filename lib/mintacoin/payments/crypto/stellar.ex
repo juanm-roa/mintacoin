@@ -3,6 +3,8 @@ defmodule Mintacoin.Payments.Stellar do
   Implementation of the stellar crypto functions for payments.
   """
 
+  @behaviour Mintacoin.Payments.Crypto.Spec
+
   alias Mintacoin.Payments.Crypto.PaymentResponse
   alias Stellar.{Horizon, Horizon.Transaction, Horizon.Transactions, KeyPair, TxBuild}
   alias Stellar.TxBuild.Payment
@@ -12,19 +14,17 @@ defmodule Mintacoin.Payments.Stellar do
   @type asset :: list()
   @type envelope :: {:ok, String.t()} | {:error, atom()}
   @type format_response :: {:ok, PaymentResponse.t()} | {:error, any()}
+  @type key :: String.t()
   @type operations :: list()
   @type payment :: Payment.t()
   @type sequence_number :: struct()
   @type signatures :: list()
   @type tx_response :: {:ok | :error, map()}
-  @type key :: String.t()
-
-  @behaviour Mintacoin.Payments.Crypto.Spec
 
   @impl true
   def create_payment(opts) do
-    source_sk = Keyword.get(opts, :source_secret_key)
-    destination_pk = Keyword.get(opts, :destination_public_key)
+    source_secret_key = Keyword.get(opts, :source_secret_key)
+    destination_public_key = Keyword.get(opts, :destination_public_key)
     amount = Keyword.get(opts, :amount)
     asset_code = Keyword.get(opts, :asset_code)
 
@@ -34,15 +34,15 @@ defmodule Mintacoin.Payments.Stellar do
     } = master_account_information()
 
     %{
-      public_key: source_pk,
+      public_key: source_public_key,
       signature: source_signature
-    } = account_information(source_sk)
+    } = account_information(source_secret_key)
 
     asset = [code: asset_code, issuer: master_pk]
     signatures = [master_signature, source_signature]
 
-    destination_pk
-    |> build_payment_operation(source_pk, asset, amount)
+    destination_public_key
+    |> build_payment_operation(source_public_key, asset, amount)
     |> build_envelope(master_pk, signatures)
     |> execute_transaction()
   end
@@ -65,35 +65,39 @@ defmodule Mintacoin.Payments.Stellar do
   defp master_account_secret_key, do: Application.get_env(:mintacoin, :stellar_fund_secret_key)
 
   @spec build_payment_operation(
-          destination_pk :: key(),
-          source_pk :: key(),
+          destination_public_key :: key(),
+          source_public_key :: key(),
           asset :: asset(),
           amount :: amount()
         ) :: list()
-  defp build_payment_operation(destination_pk, source_pk, asset, amount),
-    do: [payment_operation(destination_pk, source_pk, asset, amount)]
+  defp build_payment_operation(destination_public_key, source_public_key, asset, amount),
+    do: [payment_operation(destination_public_key, source_public_key, asset, amount)]
 
   @spec payment_operation(
-          destination_pk :: key(),
-          source_pk :: key(),
+          destination_public_key :: key(),
+          source_public_key :: key(),
           asset :: asset(),
           amount :: amount()
         ) :: payment()
-  defp payment_operation(destination_pk, source_pk, asset, amount) do
+  defp payment_operation(destination_public_key, source_public_key, asset, amount) do
     Payment.new(
-      destination: destination_pk,
+      destination: destination_public_key,
       asset: asset,
       amount: amount,
-      source_account: source_pk
+      source_account: source_public_key
     )
   end
 
-  @spec build_envelope(operations :: operations(), source_pk :: key(), signatures :: signatures()) ::
+  @spec build_envelope(
+          operations :: operations(),
+          source_public_key :: key(),
+          signatures :: signatures()
+        ) ::
           envelope()
-  defp build_envelope(operations, source_pk, signatures) do
-    sequence_number = get_sequence_number(source_pk)
+  defp build_envelope(operations, source_public_key, signatures) do
+    sequence_number = get_sequence_number(source_public_key)
 
-    source_pk
+    source_public_key
     |> TxBuild.Account.new()
     |> Stellar.TxBuild.new(sequence_number: sequence_number)
     |> TxBuild.add_operations(operations)
