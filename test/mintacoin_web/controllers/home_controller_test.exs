@@ -16,4 +16,16 @@ defmodule MintacoinWeb.HomeControllerTest do
       assert html =~ "Minimalist API to run your crypto"
     end
   end
+
+  describe "GET /" do
+    test "with normal behaviour", %{conn: conn} do
+      html =
+        conn
+        |> get("/")
+        |> html_response(200)
+
+      assert html =~ "Welcome to Mintacoin"
+      assert html =~ "Minimalist API to run your crypto"
+    end
+  end
 end
