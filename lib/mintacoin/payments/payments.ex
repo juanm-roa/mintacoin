@@ -46,6 +46,31 @@ defmodule Mintacoin.Payments do
         asset_id: asset_id,
         amount: amount
       }) do
+    IO.inspect("Titulo!!")
+    {:ok, amount} = validate_amount(amount)
+    IO.inspect(amount)
+
+    IO.inspect(source_account_id, label: "SAID")
+    IO.inspect(blockchain_id, label: "BID")
+
+    {:ok, %Wallet{id: source_wallet_id}} =
+      source_wallet =
+      Wallets.retrieve_by_account_id_and_blockchain_id(source_account_id, blockchain_id)
+
+    IO.inspect(source_wallet)
+
+    {:ok, %Wallet{id: destination_wallet_id}} =
+      destintion_wallet =
+      Wallets.retrieve_by_account_id_and_blockchain_id(destination_account_id, blockchain_id)
+
+    IO.inspect(destintion_wallet)
+
+    IO.inspect(validate_asset_trustline(destination_wallet_id, asset_id))
+
+    {:ok, balance} = Balances.retrieve_by_wallet_id_and_asset_id(source_wallet_id, asset_id)
+    IO.inspect(balance)
+    IO.inspect(validate_source_funds(balance, amount))
+
     with {:ok, amount} <- validate_amount(amount),
          {:ok, %Wallet{id: source_wallet_id}} <-
            Wallets.retrieve_by_account_id_and_blockchain_id(source_account_id, blockchain_id),

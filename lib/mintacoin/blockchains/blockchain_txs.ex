@@ -60,7 +60,12 @@ defmodule Mintacoin.BlockchainTxs do
 
   @spec retrieve_by_payment_id(payment_id :: id()) :: {:ok, list(blockchain_tx())}
   def retrieve_by_payment_id(payment_id) do
-    query = from(btx in BlockchainTx, where: btx.payment_id == ^payment_id)
+    query =
+      from(btx in BlockchainTx,
+        where: btx.payment_id == ^payment_id,
+        order_by: [desc: btx.tx_timestamp]
+      )
+
     {:ok, Repo.all(query)}
   end
 end
