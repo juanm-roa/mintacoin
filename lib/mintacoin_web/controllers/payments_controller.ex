@@ -5,7 +5,7 @@ defmodule MintacoinWeb.PaymentsController do
 
   use MintacoinWeb, :controller
 
-  alias Ecto.{Changeset, UUID}
+  alias Ecto.UUID
 
   alias Mintacoin.{
     Asset,
@@ -18,20 +18,20 @@ defmodule MintacoinWeb.PaymentsController do
     Wallets
   }
 
-  @type blockchain :: Blockchain.t()
+  @type address :: String.t()
   @type asset :: Asset.t()
+  @type blockchain :: Blockchain.t()
+  @type blockchain_name :: String.t()
   @type conn :: Plug.Conn.t()
   @type id :: UUID.t()
+  @type network :: :testnet | :mainnet
   @type params :: map()
+  @type payment :: Payment.t()
   @type resource :: Payment.t()
   @type response_status :: :created
   @type status :: :ok | :error
   @type template :: String.t()
-  @type address :: String.t()
-  @type blockchain_name :: String.t()
   @type wallet :: Wallet.t()
-  @type network :: :testnet | :mainnet
-  @type payment :: Payment.t()
   @type error ::
           :blockchain_not_found
           | :invalid_supply_format
@@ -61,11 +61,14 @@ defmodule MintacoinWeb.PaymentsController do
     blockchain_name = Map.get(params, "blockchain", @default_blockchain_name)
 
     with {:ok, %Asset{}} <- retrieve_asset(asset_id),
-         {:ok, %Blockchain{} = blockchain} <- retrieve_blockchain(blockchain_name, network),
-         {:ok, %Wallet{} = source_wallet} <- retrieve_wallet(blockchain, source_address),
-         {:ok, %Wallet{} = destination_wallet} <- retrieve_wallet(blockchain, destination_address) do
-      source_wallet
-      |> create_payment(destination_wallet, blockchain, params)
+         {:ok, %Blockchain{id: blockchain_id}} <-
+           retrieve_blockchain(blockchain_name, network),
+         {:ok, %Wallet{account_id: source_account_id}} <-
+           retrieve_wallet(blockchain_id, source_address),
+         {:ok, %Wallet{account_id: destination_account_id}} <-
+           retrieve_wallet(blockchain_id, destination_address) do
+      source_account_id
+      |> create_payment(destination_account_id, blockchain_id, params)
       |> handle_response(conn, :created, "payment.json")
     end
   end
@@ -88,10 +91,10 @@ defmodule MintacoinWeb.PaymentsController do
   end
 
   @spec retrieve_wallet(
-          blockchain :: blockchain(),
+          blockchain_id :: id(),
           address :: address()
         ) :: {:ok, wallet()} | {:error, error()}
-  defp retrieve_wallet(%Blockchain{id: blockchain_id}, address) do
+  defp retrieve_wallet(blockchain_id, address) do
     case Wallets.retrieve_by_account_address_and_blockchain_id(address, blockchain_id) do
       {:ok, %Wallet{} = wallet} -> {:ok, wallet}
       _any -> {:error, :wallet_not_found}
@@ -99,16 +102,16 @@ defmodule MintacoinWeb.PaymentsController do
   end
 
   @spec create_payment(
-          source_wallet :: wallet(),
-          destination_wallet :: wallet(),
-          blockchain :: blockchain(),
+          source_account_id :: id(),
+          destination_account_id :: id(),
+          blockchain_id :: id(),
           params :: params()
         ) ::
           payment :: {:ok, payment()} | {:error, error}
   defp create_payment(
-         %Wallet{account_id: source_account_id},
-         %Wallet{account_id: destination_account_id},
-         %Blockchain{id: blockchain_id},
+         source_account_id,
+         destination_account_id,
+         blockchain_id,
          %{
            "source_signature" => source_signature,
            "amount" => amount,
