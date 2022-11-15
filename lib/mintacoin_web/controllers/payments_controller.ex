@@ -39,6 +39,9 @@ defmodule MintacoinWeb.PaymentsController do
           | :bad_request
           | :asset_not_found
           | :wallet_not_found
+          | :insufficient_funds
+          | :destination_trustline_not_found
+          | :source_balance_not_found
           | Changeset.t()
 
   action_fallback MintacoinWeb.FallbackController

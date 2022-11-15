@@ -37,7 +37,7 @@ defmodule Mintacoin.Payments do
           | :decoding_error
           | :invalid_supply_format
           | :destination_trustline_not_found
-          | :insuficient_funds
+          | :insufficient_funds
           | :source_balance_not_found
 
   @spec create(params :: params()) :: {:ok, payment()} | {:error, error()}
@@ -194,7 +194,7 @@ defmodule Mintacoin.Payments do
 
     case Decimal.negative?(difference) do
       false -> {:ok, balance}
-      true -> {:error, :insuficient_funds}
+      true -> {:error, :insufficient_funds}
     end
   end
 

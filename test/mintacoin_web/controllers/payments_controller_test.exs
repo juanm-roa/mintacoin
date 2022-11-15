@@ -199,6 +199,72 @@ defmodule MintacoinWeb.PaymentsControllerTest do
         "status" => 400
       } = json_response(conn, 400)
     end
+
+    test "when the balance of the source account is insufficient", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 20_000,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "insufficient_funds",
+        "detail" => "The source account doesn't have enough funds to make the payment",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+
+    test "when authenticate token is invalid", %{
+      conn_invalid_token: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => 401,
+        "detail" => "Invalid authorization Bearer token",
+        "status" => "unauthorized"
+      } = json_response(conn, 401)
+    end
+
+    test "when authenticate token is not submit", %{
+      conn_unauthenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => 401,
+        "detail" => "Missing authorization Bearer token",
+        "status" => "unauthorized"
+      } = json_response(conn, 401)
+    end
   end
 
   describe "create/1 when the destination doesn't have a trustline with the asset" do

@@ -26,7 +26,8 @@ defmodule MintacoinWeb.FallbackController do
       {400, "The destination account doesn't have a trustline with the asset"},
     source_balance_not_found:
       {400, "The source account doesn't have a balance of the given asset"},
-    invalid_supply_format: {400, "The introduced supply format is invalid"}
+    invalid_supply_format: {400, "The introduced supply format is invalid"},
+    insufficient_funds: {400, "The source account doesn't have enough funds to make the payment"}
   ]
 
   # This clause handles errors returned by Ecto's insert/update/delete.

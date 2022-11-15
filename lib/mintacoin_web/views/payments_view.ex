@@ -3,7 +3,7 @@ defmodule MintacoinWeb.PaymentsView do
   This module contains the JSON response for the asset's endpoints
   """
 
-  alias Mintacoin.{Payment}
+  alias Mintacoin.Payment
 
   @type template :: String.t()
   @type assigns :: map()
@@ -12,7 +12,4 @@ defmodule MintacoinWeb.PaymentsView do
   @spec render(template :: template(), assigns :: assigns()) :: json()
   def render("payment.json", %{resource: %Payment{id: payment_id}}),
     do: %{status: 201, data: %{payment_id: payment_id}}
-
-  def render("error.json", %{error: %{status: status, code: code, detail: detail}}),
-    do: %{status: status, code: code, detail: detail}
 end
