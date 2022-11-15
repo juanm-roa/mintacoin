@@ -42,7 +42,6 @@ defmodule MintacoinWeb.PaymentsController do
           | :insufficient_funds
           | :destination_trustline_not_found
           | :source_balance_not_found
-          | Changeset.t()
 
   action_fallback MintacoinWeb.FallbackController
 
