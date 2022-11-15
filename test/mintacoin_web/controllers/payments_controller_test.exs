@@ -2,25 +2,34 @@ defmodule MintacoinWeb.PaymentsControllerTest do
   @moduledoc """
   This module is used to test payments's endpoints
   """
-  alias Mintacoin.Balances
 
   use MintacoinWeb.ConnCase
   use Oban.Testing, repo: Mintacoin.Repo
 
   import Mintacoin.Factory, only: [insert: 1, insert: 2]
 
+  alias Mintacoin.{Accounts.Cipher, Payment, Payments, Payments.StellarMock}
+
   setup %{conn: conn} do
-    Application.put_env(:mintacoin, :crypto_impl, AccountStellarMock)
+    Application.put_env(:mintacoin, :crypto_impl, StellarMock)
 
     on_exit(fn ->
       Application.delete_env(:mintacoin, :crypto_impl)
     end)
 
-    address = "GB3ZYW3WZWQU6CAEA6EQ4ALER456DPVBC6YLQRDKTTSNEVJOGFCECX5L"
-    signature = "SB3RAKL2MRYZ53WJQAL5RJ42LPCMJTNDH4W7UWVRJA3GTEC66BC7VNUT"
-
     blockchain = insert(:blockchain, %{name: "stellar", network: "testnet"})
-    account = insert(:account, %{address: address, signature: signature})
+
+    source_account =
+      insert(:account, %{
+        address: "F7NJQPUN2ZFQTSGQWJ44NKBMEBQU3TEWS4ADL5SX32ZEGR2C5MUA",
+        signature: "336XNTQP3W4MRAYNBYVRL2OKFSNBWR574OC4PKB3KYPCXALTUGHA"
+      })
+
+    destination_account =
+      insert(:account, %{
+        address: "XN5BDEMCLMDYDD6UTG2ZM26UGX6BF6VMN3VR23BKISOOZT7TEJEQ",
+        signature: "WZTTQ2B42QBTXJU5ZOTZUSF72V7E55BMBTGDOLY5W5NW6T3U7S6Q"
+      })
 
     api_token = Application.get_env(:mintacoin, :api_token)
 
@@ -35,9 +44,8 @@ defmodule MintacoinWeb.PaymentsControllerTest do
       |> put_req_header("authorization", "Bearer INVALID_TOKEN")
 
     %{
-      source_account: account,
-      address: address,
-      signature: signature,
+      source_account: source_account,
+      destination_account: destination_account,
       blockchain: blockchain,
       conn_authenticated: conn_authenticated,
       conn_unauthenticated: put_req_header(conn, "accept", "application/json"),
@@ -47,30 +55,279 @@ defmodule MintacoinWeb.PaymentsControllerTest do
   end
 
   describe "create/2" do
-    setup [:create_asset, :create_payer_data]
+    setup [
+      :create_asset,
+      :create_source_data,
+      :create_source_trustline,
+      :create_destination_data,
+      :create_destination_trustline
+    ]
 
-    test "with valid params", %{conn_authenticated: conn, source_account: %{address: source_address, signature: source_signature}, blockchain: %{name: blockchain_name}} do
-      conn = post(conn, Routes.payments_path(conn, :create), {
-        source_signature: source_signature,
-        source_address: source_address,
-        destination_address: "IEJXTX2MUI26SMDNNHA7GWLTUZ55YDS7UXMFY4K3SDJ42DETDNWQ",
-        amount: 60,
-        asset_id: "63c2a7cf-41bc-4d3e-9a13-d27cb63a8949"
-       })
-
+    test "with valid params", %{
+      conn_authenticated: conn,
+      source_account: %{id: source_id, address: source_address, signature: source_signature},
+      destination_account: %{id: destination_id, address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
 
       %{
         "data" => %{
-          "payment_id" => _payment_id
+          "payment_id" => payment_id
         },
         "status" => 201
       } = json_response(conn, 201)
+
+      {:ok, %Payment{source_account_id: ^source_id, destination_account_id: ^destination_id}} =
+        Payments.retrieve_by_id(payment_id)
+    end
+
+    test "with invalid source address", %{
+      conn_authenticated: conn,
+      source_account: %{signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: "NTYVZN3ZNFFFPOCPKTFY3TPPOYMVYR53JHRWYNW3DIDMWC7AGF5Q",
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "wallet_not_found",
+        "detail" =>
+          "The introduced address doesn't exist or doesn't have associated the blockchain",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+
+    test "with invalid destination address", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: "NTYVZN3ZNFFFPOCPKTFY3TPPOYMVYR53JHRWYNW3DIDMWC7AGF5Q",
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "wallet_not_found",
+        "detail" =>
+          "The introduced address doesn't exist or doesn't have associated the blockchain",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+
+    test "with invalid source signature", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: "NTYVZN3ZNFFFPOCPKTFY3TPPOYMVYR53JHRWYNW3DIDM",
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "decoding_error",
+        "detail" => "The signature is invalid",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+
+    test "with invalid asset id", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      not_existing_uuid: not_existing_uuid
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: not_existing_uuid
+        })
+
+      %{
+        "code" => "asset_not_found",
+        "detail" => "The introduced asset doesn't exist",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+
+    test "with invalid amount format", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: "34ABC",
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "invalid_supply_format",
+        "detail" => "The introduced supply format is invalid",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+  end
+
+  describe "create/1 when the destination doesn't have a trustline with the asset" do
+    setup [
+      :create_asset,
+      :create_source_data,
+      :create_source_trustline,
+      :create_destination_data
+    ]
+
+    test "with valid params", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "destination_trustline_not_found",
+        "detail" => "The destination account doesn't have a trustline with the asset",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+  end
+
+  describe "create/1 when the destination doesn't have a wallet in the blockchain" do
+    setup [
+      :create_asset,
+      :create_source_data,
+      :create_source_trustline
+    ]
+
+    test "with valid params", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "wallet_not_found",
+        "detail" =>
+          "The introduced address doesn't exist or doesn't have associated the blockchain",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+  end
+
+  describe "create/1 when the source doesn't have a trustline with the asset" do
+    setup [
+      :create_asset,
+      :create_source_data,
+      :create_destination_data,
+      :create_destination_trustline
+    ]
+
+    test "with valid params", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "source_balance_not_found",
+        "detail" => "The source account doesn't have a balance of the given asset",
+        "status" => 400
+      } = json_response(conn, 400)
+    end
+  end
+
+  describe "create/1 when the source doesn't have a wallet in the blockchain" do
+    setup [
+      :create_asset,
+      :create_destination_data,
+      :create_destination_trustline
+    ]
+
+    test "with valid params", %{
+      conn_authenticated: conn,
+      source_account: %{address: source_address, signature: source_signature},
+      destination_account: %{address: destination_address},
+      asset: %{id: asset_id}
+    } do
+      conn =
+        post(conn, Routes.payments_path(conn, :create), %{
+          source_signature: source_signature,
+          source_address: source_address,
+          destination_address: destination_address,
+          amount: 60,
+          asset_id: asset_id
+        })
+
+      %{
+        "code" => "wallet_not_found",
+        "detail" =>
+          "The introduced address doesn't exist or doesn't have associated the blockchain",
+        "status" => 400
+      } = json_response(conn, 400)
     end
   end
 
   defp create_asset(%{blockchain: blockchain}) do
     asset_code = "MTK"
-    supply = "55.65"
+    supply = "10000"
 
     %{signature: signature} = account = insert(:account)
 
@@ -84,13 +341,14 @@ defmodule MintacoinWeb.PaymentsControllerTest do
         encrypted_secret_key: encrypted_secret_key
       })
 
-    {:ok, asset} =
-      Assets.create(%{
-        wallet: wallet,
-        signature: signature,
-        asset_code: asset_code,
-        asset_supply: supply
-      })
+    asset = insert(:asset, %{code: asset_code, supply: supply})
+
+    insert(:asset_holder, %{
+      asset: asset,
+      blockchain: blockchain,
+      account: account,
+      wallet: wallet
+    })
 
     %{
       asset: asset,
@@ -98,7 +356,7 @@ defmodule MintacoinWeb.PaymentsControllerTest do
     }
   end
 
-  defp create_payer_data(%{
+  defp create_source_data(%{
          source_account: source_account,
          blockchain: blockchain
        }) do
@@ -108,24 +366,65 @@ defmodule MintacoinWeb.PaymentsControllerTest do
         blockchain: blockchain
       })
 
-    %{payer_wallet: wallet}
+    %{source_wallet: wallet}
   end
 
-  defp create_payer_trustline(%{
-         source_account: %{signature: payer_signature} = source_account,
-         payer_wallet: %{id: payer_wallet_id} = payer_wallet,
-         asset: %{id: asset_id} = asset
+  defp create_source_trustline(%{
+         blockchain: blockchain,
+         source_account: source_account,
+         source_wallet: source_wallet,
+         asset: asset
        }) do
-    {:ok, asset_holder} =
-      Accounts.create_trustline(%{
+    insert(:asset_holder, %{
+      asset: asset,
+      blockchain: blockchain,
+      account: source_account,
+      wallet: source_wallet
+    })
+
+    balance =
+      insert(:balance, %{
+        balance: "10000",
         asset: asset,
-        trustor_wallet: payer_wallet,
-        signature: payer_signature
+        wallet: source_wallet
       })
 
-    {:ok, %{id: balance_id}} = Balances.retrieve_by_wallet_id_and_asset_id(wallet_id, asset_id)
-    {:ok, balance} = Balances.increase_balance(balance_id, "10000")
+    %{source_balance: balance}
+  end
 
-    %{payer_balance: balance}
+  defp create_destination_data(%{
+         destination_account: destination_account,
+         blockchain: blockchain
+       }) do
+    wallet =
+      insert(:wallet, %{
+        account: destination_account,
+        blockchain: blockchain
+      })
+
+    %{destination_wallet: wallet}
+  end
+
+  defp create_destination_trustline(%{
+         blockchain: blockchain,
+         destination_account: destination_account,
+         destination_wallet: destination_wallet,
+         asset: asset
+       }) do
+    insert(:asset_holder, %{
+      asset: asset,
+      blockchain: blockchain,
+      account: destination_account,
+      wallet: destination_wallet
+    })
+
+    balance =
+      insert(:balance, %{
+        balance: "10000",
+        asset: asset,
+        wallet: destination_wallet
+      })
+
+    %{destination_balance: balance}
   end
 end

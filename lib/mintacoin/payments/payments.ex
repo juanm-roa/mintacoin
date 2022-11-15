@@ -9,6 +9,7 @@ defmodule Mintacoin.Payments do
 
   alias Mintacoin.{
     Account,
+    Accounts.Cipher,
     AssetHolder,
     AssetHolders,
     Balance,
@@ -30,8 +31,10 @@ defmodule Mintacoin.Payments do
   @type payment :: Payment.t()
   @type payments :: list(payment) | []
   @type signature :: String.t()
+  @type encrypted_secret_key :: String.t()
   @type error ::
           Changeset.t()
+          | :decoding_error
           | :invalid_supply_format
           | :destination_trustline_not_found
           | :insuficient_funds
@@ -46,34 +49,10 @@ defmodule Mintacoin.Payments do
         asset_id: asset_id,
         amount: amount
       }) do
-    IO.inspect("Titulo!!")
-    {:ok, amount} = validate_amount(amount)
-    IO.inspect(amount)
-
-    IO.inspect(source_account_id, label: "SAID")
-    IO.inspect(blockchain_id, label: "BID")
-
-    {:ok, %Wallet{id: source_wallet_id}} =
-      source_wallet =
-      Wallets.retrieve_by_account_id_and_blockchain_id(source_account_id, blockchain_id)
-
-    IO.inspect(source_wallet)
-
-    {:ok, %Wallet{id: destination_wallet_id}} =
-      destintion_wallet =
-      Wallets.retrieve_by_account_id_and_blockchain_id(destination_account_id, blockchain_id)
-
-    IO.inspect(destintion_wallet)
-
-    IO.inspect(validate_asset_trustline(destination_wallet_id, asset_id))
-
-    {:ok, balance} = Balances.retrieve_by_wallet_id_and_asset_id(source_wallet_id, asset_id)
-    IO.inspect(balance)
-    IO.inspect(validate_source_funds(balance, amount))
-
     with {:ok, amount} <- validate_amount(amount),
-         {:ok, %Wallet{id: source_wallet_id}} <-
+         {:ok, %Wallet{id: source_wallet_id, encrypted_secret_key: encrypted_secret_key}} <-
            Wallets.retrieve_by_account_id_and_blockchain_id(source_account_id, blockchain_id),
+         {:ok, _secret_key} <- validate_source_signature(source_signature, encrypted_secret_key),
          {:ok, %Wallet{id: destination_wallet_id}} <-
            Wallets.retrieve_by_account_id_and_blockchain_id(destination_account_id, blockchain_id),
          {:ok, __asset_holder} <- validate_asset_trustline(destination_wallet_id, asset_id),
@@ -126,6 +105,17 @@ defmodule Mintacoin.Payments do
       )
 
     {:ok, Repo.all(query)}
+  end
+
+  @spec validate_source_signature(
+          source_signature :: signature(),
+          encrypted_secret_key :: encrypted_secret_key()
+        ) :: {:ok, signature()} | {:error, error()}
+  defp validate_source_signature(source_signature, encrypted_secret_key) do
+    case Cipher.decrypt(encrypted_secret_key, source_signature) do
+      {:ok, secret_key} -> {:ok, secret_key}
+      {:error, error} -> {:error, error}
+    end
   end
 
   @spec create_db_record(params :: params()) :: {:ok, payment()} | {:error, error()}
